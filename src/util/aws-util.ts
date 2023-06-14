@@ -568,12 +568,14 @@ export class CfnUtil {
                     retryAccountIsBeingInitialized = true;
                 } else if (err && (err.code === 'ValidationError' && err.message) || (err.code === 'ResourceNotReady')) {
                     const message = err.message as string;
-                    if (-1 !== message.indexOf('ROLLBACK_COMPLETE') || -1 !== message.indexOf('ROLLBACK_FAILED') || -1 !== message.indexOf('DELETE_FAILED')) {
+                    if (message.includes('ROLLBACK_COMPLETE') || message.includes('DELETE_FAILED')) {
                         await cfn.deleteStack({ StackName: updateStackInput.StackName, RoleARN: updateStackInput.RoleARN }).promise();
                         await cfn.waitFor('stackDeleteComplete', { StackName: updateStackInput.StackName, $waiter: { delay: 1, maxAttempts: 60 * 30 } }).promise();
                         updateStackInput.ClientRequestToken = uuid();
                         await cfn.createStack(updateStackInput).promise();
                         describeStack = await cfn.waitFor('stackCreateComplete', { StackName: updateStackInput.StackName, $waiter: { delay: 1, maxAttempts: 60 * 30 } }).promise();
+                    } else if (message.includes('ROLLBACK_FAILED')) {
+                        throw new OrgFormationError(`Stack ${updateStackInput.StackName} is in ROLLBACK_FAILED state and needs manual attention.`);
                     } else if (-1 !== message.indexOf('No updates are to be performed.')) {
                         describeStack = await cfn.describeStacks({ StackName: updateStackInput.StackName }).promise();
                         // ignore;

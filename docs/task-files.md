@@ -17,10 +17,12 @@
     - [!Include](#include)
   - [Task types](#task-types)
     - [update-organization](#update-organization)
+    - [annotate-organization](#annotate-organization)
     - [update-stacks](#update-stacks)
     - [update-serverless.com](#update-serverlesscom)
     - [copy-to-s3](#copy-to-s3)
     - [update-cdk](#update-cdk)
+    - [apply-tf](#apply-tf)
     - [register-type](#register-type)
     - [include](#include-1)
   - [Templating](#templating)
@@ -281,6 +283,28 @@ The `update-organization` task will update all the organization resources based 
 | Skip              | `true` or `false` | When `true` task (and dependent tasks) will not be executed. |
 | TemplatingContext | Dictionary        | Specifies the data for [templating](#templating).            |
 
+### annotate-organization
+
+The `annotate-organization` task will will allow you to use a different account factory (e.g. AWS Control Tower) while using org-formation to provision resources across the AWS Organization. If you use `annotate-organization`, you must use this *instead of* `update-organization`.
+
+| Attribute         | Value             | Remarks                                                      |
+| :---------------- | :---------------- | :----------------------------------------------------------- |
+| DefaultOrganizationAccessRoleName   | string     | The name of the Role used for cross account access (default is: `OrganizationAccountAccessRole`).                                   |
+| ExcludeAccounts   | List<string> | A list (array) of AWS Account Ids (string) that will be excluded from the org-formation provisioning process. These accounts will not be addressable using `!Ref AccountName` or bindings, such as `Account: *` |
+| AccountMapping    | Dictionary<string, string> | Dictionary where the AttributeName will be used as the Logical Name of the account, specified as Attribute value. When not specified, the account name is used as Logical Name.|
+
+example:
+``` yml
+AnnotateOrganization:
+  Type: annotate-organization
+  DefaultOrganizationAccessRoleName: OrganizationAccountAccessRole
+  ExcludeAccounts: ["123123123123", "123123123124"]
+  AccountMapping:
+    AccountA: "234234234234" # these mappings are optional, when specified the account can be referenced using `!Ref AccountA`
+    AccountB: "234234234235" # when not specified the account can be referenced using `!Ref My Account B` (or whatever the account name is)
+                             # regardless of this, accounts will always be included in bindings like `Account: *`
+```
+
 ### update-stacks
 
 The `update-stacks` task will provision all resources in all accounts specified in `Template`.
@@ -356,6 +380,8 @@ The `update-serverless.com` task will deploy the [serverless.com](https://server
 | OrganizationBinding | [OrganizationBinding](https://github.com/org-formation/org-formation-cli/blob/master/docs/cloudformation-resources.md#organizationbinding-where-to-create-which-resource) | This property is required. <br/><br/>Organization binding used to specify which accounts the serverless.com workload needs to be deployed to.                                                                                                        |
 | Config              | relative path                                                                                                                                                             | Name of the Serverless.com configuration file that contains information about the payload.<br/><br/>default is **./serverless.yml**                                                                                                                  |
 | Stage               | string                                                                                                                                                                    | Value used as stage when deploying the serverless.com workload                                                                                                                                                                                       |
+| SLSVersion          | number                                                                                                                                                                    | Depending on the version specified it will render parameters differently <br/><br/> Default = 2                                                                                                                                                      |
+| IgnoreFileChanges   | string or list                                                                                                                                                            | Regex, Name or list of regex/names for files that if matched will be ignored when generating the MD5 hash to detect if update is actually necessary.                                                                                                 |
 | RunNpmInstall       | boolean                                                                                                                                                                   | When true, `npm ci` will be ran before serverless deployment and removal                                                                                                                                                                             |
 | CustomDeployCommand | string                                                                                                                                                                    | When specified will override the default command used when deploying a serverless.com workload. <br/><br/>default command is: `npm ci && npx sls deploy ${CurrentTask.Parameters} --region ${region} --stage ${stage} --config ${config} --conceal`. |
 | CustomRemoveCommand | string                                                                                                                                                                    | When specified will override the default command used when removing a serverless.com workload. <br/><br/>default command is: `npm ci && npx sls remove ${CurrentTask.Parameters} --region ${region} --stage ${stage} --config ${config} --conceal`.  |
@@ -412,11 +438,12 @@ The `update-cdk` task will deploy the a CDK workload defined in the directory sp
 
 | Attribute           | Value                                                                                                                                                                     | Remarks                                                                                                                                                                                               |
 | :------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Path                | relative path                                                                                                                                                             | This property is required. <br/><br/>Specifies which directory contains the serverless.com workload                                                                                                   |
+| Path                | relative path                                                                                                                                                             | This property is required. <br/><br/>Specifies which directory contains the CDK workload                                                                                                   |
 | OrganizationBinding | [OrganizationBinding](https://github.com/org-formation/org-formation-cli/blob/master/docs/cloudformation-resources.md#organizationbinding-where-to-create-which-resource) | This property is required. <br/><br/>Organization binding used to specify which accounts the CDK workload needs to be deployed to.                                                                    |
+| IgnoreFileChanges   | string or list                                                                                                                                                            | Regex, Name or list of regex/names for files that if matched will be ignored when generating the MD5 hash to detect if update is actually necessary.                                                  |
 | RunNpmInstall       | boolean                                                                                                                                                                   | When true, `npm ci` will be ran before CDK and removal                                                                                                                                                |
 | RunNpmBuild         | boolean                                                                                                                                                                   | When true, `npm run build` will be ran before CDK and removal                                                                                                                                         |
-| CustomDeployCommand | string                                                                                                                                                                    | When specified will override the default command used when deploying a serverless.com workload. <br/><br/>default command is: `npm ci && npm run build && npx cdk deploy --all --require-approval ${CurrentTask.Parameters} `. |
+| CustomDeployCommand | string                                                                                                                                                                    | When specified will override the default command used when deploying a CDK workload. <br/><br/>default command is: `npm ci && npm run build && npx cdk deploy --all --require-approval ${CurrentTask.Parameters} --output cdk.out/${CurrentTask.AccountId} `. |
 | CustomRemoveCommand | string                                                                                                                                                                    | When specified will override the default command used when removing a CDK workload. <br/><br/>default command is: `npm ci && npm run build && npx cdk destroy --all --require-approval ${CurrentTask.Parameters} `.            |
 | DependsOn           | Name of task or list of names                                                                                                                                             | The tasks listed in this attribute will be executed before this task.                                                                                                                                 |
 | Skip                | `true` or `false`                                                                                                                                                         | When `true` task (and dependent tasks) will not be executed.                                                                                                                                          |
@@ -435,6 +462,46 @@ CdkWorkload:
     resourcePrefix: my
   OrganizationBinding:
     Account: !Ref AccountA
+```
+
+### apply-tf
+
+The `apply-tf` task will apply a Terraform workload defined in the directory specified by `Path`.
+
+> **Note**
+> This task currently requires Terraform to already be installed at runtime.
+
+| Attribute| Value| Remarks|
+| :---| :---| :---| 
+| Path | relative path | This property is required. <br/><br/>Specifies which directory contains the Terraform workload |
+| OrganizationBinding | [OrganizationBinding](https://github.com/org-formation/org-formation-cli/blob/master/docs/cloudformation-resources.md#organizationbinding-where-to-create-which-resource) | This property is required. <br/><br/>Organization binding used to specify which accounts the Terraform workload needs to be deployed to. |
+| IgnoreFileChanges   | string or list                                                                                                                                                            | Regex, Name or list of regex/names for files that if matched will be ignored when generating the MD5 hash to detect if update is actually necessary. |
+| BackendConfig       | any | When specified, will be passed to the `terraform init -reconfigure` command prior to `terraform apply` (or `terraform destroy`)|
+| Parameters | any | When specified, will be passed to the `terraform apply` (or `terraform destroy`) command using `-var` |
+| CustomDeployCommand | string | When specified will override the default command used when applying the Terraform workload. <br/><br/>default command is: `terraform apply ${CurrentTask.Parameters} -auto-approve`. |
+| CustomRemoveCommand | string | When specified will override the default command used when destroying the Terraform workload. <br/><br/>default command is: `terraform destroy ${CurrentTask.Parameters} -auto-approve`. |
+| CustomInitCommand | string | When specified will override the default command used prior to applying or destroying the Terraform workload. <br/><br/>default command is: `terraform init -reconfigure ${CurrentTask.BackendConfig}`. |
+| DependsOn | Name of task or list of names | The tasks listed in this attribute will be executed before this task.|
+| Skip | `true` or `false` | When `true` task (and dependent tasks) will not be executed. |
+| TaskRoleName | string | Specifies the name of the IAM Role that must be used for cross account access. A role with this is expected to exist in the target account (and have the right AssumeRole permissions). |
+
+
+**example**
+
+```yaml
+TfWorkload:
+  Type: apply-tf
+  Path: ./folder-with-terraform
+  OrganizationBinding:
+    IncludeMasterAccount: false
+    Region: "eu-central-1"
+    Account: !Ref MyTargetAccount
+  BackendConfig:
+    bucket: "my-s3-state-bucket"
+    region: "us-east-1"
+    key: !Sub ${CurrentAccount}.tfstate
+  Parameters:
+    tfvarforbucketname: !Sub ${CurrentAccount}-bucket
 ```
 
 ### register-type

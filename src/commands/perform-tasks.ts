@@ -1,12 +1,11 @@
 import { readFileSync } from 'fs';
 import { Command } from 'commander';
-import minimatch from 'minimatch';
 import { BaseCliCommand, ICommandArgs } from './base-command';
 import { UpdateOrganizationCommand } from './update-organization';
 import { BuildTaskProvider } from '~build-tasks/build-task-provider';
 import { ITrackedTask, PersistedState } from '~state/persisted-state';
 import { Validator } from '~parser/validator';
-import { BuildConfiguration, IBuildTask } from '~build-tasks/build-configuration';
+import { BuildConfiguration } from '~build-tasks/build-configuration';
 import { BuildRunner } from '~build-tasks/build-runner';
 import { ConsoleUtil } from '~util/console-util';
 import { S3StorageProvider } from '~state/storage-provider';
@@ -33,21 +32,21 @@ export class PerformTasksCommand extends BaseCliCommand<IPerformTasksCommandArgs
     }
 
     public addOptions(command: Command): void {
-        command.option('--logical-name <tasks-logical-name>', 'logical name of the tasks file, allows multiple tasks files to be used together with --perform-cleanup action', 'default');
-        command.option('--perform-cleanup', 'when set will remove resources created by previous perform-tasks after task is removed from tasks file', false);
-        command.option('--max-concurrent-tasks <max-concurrent-tasks>', 'maximum number of tasks to be executed concurrently', 1);
-        command.option('--max-concurrent-stacks <max-concurrent-stacks>', 'maximum number of stacks (within a task) to be executed concurrently', 1);
-        command.option('--failed-tasks-tolerance <failed-tasks-tolerance>', 'the number of failed tasks after which execution stops', 0);
-        command.option('--failed-stacks-tolerance <failed-stacks-tolerance>', 'the number of failed stacks (within a task) after which execution stops', 0);
-        command.option('--organization-file [organization-file]', 'organization file used for organization bindings');
-        command.option('--parameters [parameters]', 'parameters used when creating build tasks from tasks file');
-        command.option('--organization-state-object [organization-state-object]', 'key for object used to load read-only organization state');
-        command.option('--organization-state-bucket-name [organization-state-bucket-name]', 'name of the bucket that contains the read-only organization state');
         command.option('--debug-templating [debug-templating]', 'when set to true the output of text templating processes will be stored on disk', false);
-        command.option('--templating-context-file [templating-context-file]', 'json file used as context for nunjuck text templating of organization and tasks file');
-        command.option('--match [match]', 'glob pattern used to define/filter which tasks to run.');
-        command.option('--large-template-bucket-name [large-template-bucket-name]', 'bucket used when uploading large templates. default is to create a bucket just-in-time in the target account');
         command.option('--dev', 'use development settings, e.g. DefaultDevelopmentBuildAccessRoleName instead of DefaultBuildAccessRoleName', false);
+        command.option('--failed-stacks-tolerance <failed-stacks-tolerance>', 'the number of failed stacks (within a task) after which execution stops', 0);
+        command.option('--failed-tasks-tolerance <failed-tasks-tolerance>', 'the number of failed tasks after which execution stops', 0);
+        command.option('--large-template-bucket-name [large-template-bucket-name]', 'bucket used when uploading large templates. default is to create a bucket just-in-time in the target account');
+        command.option('--logical-name <tasks-logical-name>', 'logical name of the tasks file, allows multiple tasks files to be used together with --perform-cleanup action', 'default');
+        command.option('--match [match]', 'glob pattern used to define/filter which tasks to run.');
+        command.option('--max-concurrent-stacks <max-concurrent-stacks>', 'maximum number of stacks (within a task) to be executed concurrently', 1);
+        command.option('--max-concurrent-tasks <max-concurrent-tasks>', 'maximum number of tasks to be executed concurrently', 1);
+        command.option('--organization-file [organization-file]', 'organization file used for organization bindings');
+        command.option('--organization-state-bucket-name [organization-state-bucket-name]', 'name of the bucket that contains the read-only organization state');
+        command.option('--organization-state-object [organization-state-object]', 'key for object used to load read-only organization state');
+        command.option('--parameters [parameters]', 'parameters used when creating build tasks from tasks file');
+        command.option('--perform-cleanup', 'when set will remove resources created by previous perform-tasks after task is removed from tasks file', false);
+        command.option('--templating-context-file [templating-context-file]', 'json file used as context for nunjuck text templating of organization and tasks file');
 
         command.option('--skip-storing-state', 'when set, the state will not be stored');
         super.addOptions(command);
@@ -71,7 +70,8 @@ export class PerformTasksCommand extends BaseCliCommand<IPerformTasksCommandArgs
         command.parsedParameters = this.parseCfnParameters(command.parameters);
         const config = new BuildConfiguration(tasksFile, command.parsedParameters, command.TemplatingContext);
 
-        const [state, template] = await Promise.all([this.getState(command), config.fixateOrganizationFile(command)]);
+        const template = await config.fixateOrganizationFile(command);
+        const state = await this.getState(command);
 
         GlobalState.Init(state, template);
 
@@ -103,37 +103,6 @@ export class PerformTasksCommand extends BaseCliCommand<IPerformTasksCommandArgs
         }
 
         await state.save();
-
-    }
-
-    private skipNonMatchingLeafTasks(tasks: IBuildTask[], taskMatcher: string, tasksPrefix: string): number {
-        let skippedTasks = 0;
-        for (const task of tasks) {
-
-            const isLeafTask = task.childTasks.length === 0;
-            const taskFullName = `${tasksPrefix}${task.name}`;
-
-            if (isLeafTask) {
-                const isMatching = task.name === taskMatcher || minimatch(taskFullName, taskMatcher);
-                task.skip = isMatching ? false : true;
-            } else {
-                const skippedChildTasks = this.skipNonMatchingLeafTasks(task.childTasks, taskMatcher, `${taskFullName}/`);
-                const isAllSkipped = task.childTasks.length === skippedChildTasks;
-                task.skip = isAllSkipped ? true : false;
-            }
-
-            if (task.skip) {
-                skippedTasks = skippedTasks + 1;
-            }
-
-            if (isLeafTask && task.skip !== true) {
-                ConsoleUtil.LogInfo(`${taskFullName} matched the '${taskMatcher}' globPattern`);
-            } else {
-                ConsoleUtil.LogDebug(`${taskFullName} did not match the '${taskMatcher}' globPattern`);
-            }
-
-        }
-        return skippedTasks;
     }
 
     public static async PublishChangedOrganizationFileIfChanged(command: IPerformTasksCommandArgs, state: PersistedState): Promise<void> {
@@ -154,24 +123,24 @@ export class PerformTasksCommand extends BaseCliCommand<IPerformTasksCommandArgs
 }
 
 export interface IPerformTasksCommandArgs extends ICommandArgs {
-    tasksFile: string;
-    logicalName: string;
-    performCleanup: boolean;
-    maxConcurrentTasks: number;
-    failedTasksTolerance: number;
-    maxConcurrentStacks: number;
-    largeTemplateBucketName?: string;
     failedStacksTolerance: number;
+    failedTasksTolerance: number;
+    forceDeploy?: boolean;
+    largeTemplateBucketName?: string;
+    logicalName: string;
+    logicalNamePrefix?: string;
+    match?: string;
+    maxConcurrentStacks: number;
+    maxConcurrentTasks: number;
     organizationFile?: string;
     organizationFileContents?: string;
     organizationFileHash?: string;
-    TemplatingContext?: {};
-    templatingContextFile?: string;
+    organizationObject?: any;
     parameters?: string | {};
     parsedParameters?: Record<string, string>;
-    logicalNamePrefix?: string;
-    forceDeploy?: boolean;
-    organizationObject?: any;
+    performCleanup: boolean;
     skipStoringState?: true;
-    match?: string;
+    tasksFile: string;
+    TemplatingContext?: {};
+    templatingContextFile?: string;
 }

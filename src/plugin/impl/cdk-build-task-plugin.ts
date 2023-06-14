@@ -24,7 +24,7 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
 
         Validator.ThrowForUnknownAttribute(config, config.LogicalName, ...CommonTaskAttributeNames, 'Path',
             'FilePath', 'RunNpmInstall', 'RunNpmBuild', 'FailedTaskTolerance', 'MaxConcurrentTasks',
-            'AdditionalCdkArguments', 'InstallCommand', 'CustomDeployCommand', 'CustomRemoveCommand', 'Parameters');
+            'AdditionalCdkArguments', 'InstallCommand', 'CustomDeployCommand', 'CustomRemoveCommand', 'Parameters','IgnoreFileChanges');
 
         if (!config.Path) {
             throw new OrgFormationError(`task ${config.LogicalName} does not have required attribute Path`);
@@ -46,16 +46,13 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
             customDeployCommand: config.CustomDeployCommand,
             customRemoveCommand: config.CustomRemoveCommand,
             parameters: config.Parameters,
+            ignoreFileChanges: Array.isArray(config.IgnoreFileChanges) ? config.IgnoreFileChanges : typeof config.IgnoreFileChanges === 'string' ? [config.IgnoreFileChanges] : [],
         };
     }
 
     validateCommandArgs(commandArgs: ICdkCommandArgs): void {
         if (!commandArgs.organizationBinding) {
             throw new OrgFormationError(`task ${commandArgs.name} does not have required attribute OrganizationBinding`);
-        }
-
-        if (commandArgs.maxConcurrent > 1) {
-            throw new OrgFormationError(`task ${commandArgs.name} does not support a MaxConcurrentTasks higher than 1`);
         }
 
         if (!existsSync(commandArgs.path)) {
@@ -82,7 +79,7 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
     }
 
     getValuesForEquality(command: ICdkCommandArgs): any {
-        const hashOfCdkDirectory = Md5Util.Md5OfPath(command.path);
+        const hashOfCdkDirectory = Md5Util.Md5OfPath(command.path, command.ignoreFileChanges);
         return {
             runNpmInstall: command.runNpmInstall,
             path: hashOfCdkDirectory,
@@ -98,6 +95,7 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
             name: command.name,
             path: command.path,
             hash: globalHash,
+            maxConcurrent: command.maxConcurrent,
             runNpmInstall: command.runNpmInstall,
             runNpmBuild: command.runNpmBuild,
             taskRoleName: command.taskRoleName,
@@ -116,7 +114,7 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
             task.taskLocalHash !== undefined &&
             task.taskLocalHash === previousBindingLocalHash) {
 
-            ConsoleUtil.LogInfo(`Workload (${this.typeForTask}) ${task.name} in ${target.accountId}/${target.region} skipped, task itself did not change. Use ForceTask to force deployment.`);
+            ConsoleUtil.LogDebug(`Workload (${this.typeForTask}) ${task.name} in ${target.accountId}/${target.region} skipped, task itself did not change. Use ForceTask to force deployment.`);
             return;
         }
 
@@ -135,6 +133,10 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
 
             if (task.runNpmInstall) {
                 command = PluginUtil.PrependNpmInstall(task.path, command);
+            }
+
+            if (task.maxConcurrent > 1) {
+                command = command + `--output cdk.out/${target.accountId}`;
             }
         }
 
@@ -162,6 +164,10 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
             if (task.runNpmInstall) {
                 command = PluginUtil.PrependNpmInstall(task.path, command);
             }
+
+            if (task.maxConcurrent > 1) {
+                command = command + `--output cdk.out/${target.accountId}`;
+            }
         }
 
         const accountId = target.accountId;
@@ -175,7 +181,7 @@ export class CdkBuildTaskPlugin implements IBuildTaskPlugin<ICdkBuildTaskConfig,
         const p = await resolver.resolve(task.parameters);
         const collapsed = await resolver.collapse(p);
         const parametersAsString = CdkBuildTaskPlugin.GetParametersAsArgument(collapsed);
-        resolver.addResourceWithAttributes('CurrentTask',  { Parameters : parametersAsString });
+        resolver.addResourceWithAttributes('CurrentTask',  { Parameters : parametersAsString, AccountId : binding.target.accountId });
     }
 
     static GetEnvironmentVariables(target: IGenericTarget<ICdkTask>): Record<string, string> {
@@ -212,6 +218,7 @@ interface ICdkBuildTaskConfig extends IBuildTaskConfiguration {
     CustomDeployCommand?: string;
     CustomRemoveCommand?: string;
     Parameters?: Record<string, ICfnExpression>;
+    IgnoreFileChanges?: string | string[];
 }
 
 export interface ICdkCommandArgs extends IBuildTaskPluginCommandArgs {
@@ -221,12 +228,15 @@ export interface ICdkCommandArgs extends IBuildTaskPluginCommandArgs {
     customDeployCommand?: string;
     customRemoveCommand?: string;
     parameters?: Record<string, ICfnExpression>;
+    ignoreFileChanges?: string[];
 }
 
 export interface ICdkTask extends IPluginTask {
     path: string;
     runNpmInstall: boolean;
     runNpmBuild: boolean;
+    maxConcurrent?: number;
     customDeployCommand?: ICfnExpression;
     customRemoveCommand?: ICfnExpression;
 }
+
