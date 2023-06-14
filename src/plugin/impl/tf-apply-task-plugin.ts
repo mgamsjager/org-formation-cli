@@ -75,6 +75,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             customRemoveCommand: command.customRemoveCommand,
             parameters: command.parameters,
             backendConfig: command.backendConfig,
+            plan: command.plan,
         };
     }
 
