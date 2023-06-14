@@ -23,7 +23,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
 
         Validator.ThrowForUnknownAttribute(config, config.LogicalName, ...CommonTaskAttributeNames, 'Path',
             'FailedTaskTolerance', 'MaxConcurrentTasks', 'CustomInitCommand',
-            'CustomDeployCommand', 'CustomRemoveCommand', 'Parameters', 'BackendConfig', 'IgnoreFileChanges' );
+            'CustomDeployCommand', 'CustomRemoveCommand', 'Parameters', 'BackendConfig', 'IgnoreFileChanges', 'Plan' );
 
         if (!config.Path) {
             throw new OrgFormationError(`task ${config.LogicalName} does not have required attribute Path`);
@@ -46,6 +46,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             parameters: config.Parameters,
             backendConfig: config.BackendConfig,
             ignoreFileChanges: Array.isArray(config.IgnoreFileChanges) ? config.IgnoreFileChanges : typeof config.IgnoreFileChanges === 'string' ? [config.IgnoreFileChanges] : [],
+            plan: config.Plan,
         };
     }
 
@@ -91,6 +92,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             backendConfig: command.backendConfig,
             forceDeploy: typeof command.forceDeploy === 'boolean' ? command.forceDeploy : false,
             logVerbose: typeof command.verbose === 'boolean' ? command.verbose : false,
+            plan: command.plan,
         };
     }
 
@@ -128,7 +130,9 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             Validator.throwForUnresolvedExpressions(task.customDeployCommand, 'CustomDeployCommand');
             command = task.customDeployCommand as string;
         } else {
-            const commandExpression = { 'Fn::Sub': 'terraform apply ${CurrentTask.Parameters} -auto-approve' } as ICfnSubExpression;
+            const cmd = task.plan ? 'terraform plan ${CurrentTask.Parameters}' : 'terraform apply ${CurrentTask.Parameters} -auto-approve';
+            task.logVerbose = task.plan;
+            const commandExpression = { 'Fn::Sub': cmd } as ICfnSubExpression;
             command = await resolver.resolveSingleExpression(commandExpression, 'CustomDeployCommand');
         }
 
@@ -203,6 +207,7 @@ interface ITfBuildTaskConfig extends IBuildTaskConfiguration {
     Parameters?: Record<string, ICfnExpression>;
     BackendConfig?: Record<string, ICfnExpression>;
     IgnoreFileChanges?: string | string[];
+    Plan?: boolean;
 }
 
 export interface ITfCommandArgs extends IBuildTaskPluginCommandArgs {
@@ -213,6 +218,7 @@ export interface ITfCommandArgs extends IBuildTaskPluginCommandArgs {
     parameters?: Record<string, ICfnExpression>;
     backendConfig?: Record<string, ICfnExpression>;
     ignoreFileChanges: string[];
+    plan?: boolean;
 }
 
 export interface ITfTask extends IPluginTask {
@@ -221,4 +227,5 @@ export interface ITfTask extends IPluginTask {
     customDeployCommand?: ICfnExpression;
     customRemoveCommand?: ICfnExpression;
     backendConfig?: Record<string, ICfnExpression>;
+    plan?: boolean;
 }
