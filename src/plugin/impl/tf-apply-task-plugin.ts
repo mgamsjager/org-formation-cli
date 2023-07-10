@@ -1,6 +1,6 @@
 import path from 'path';
 import { existsSync } from 'fs';
-import { IBuildTaskPlugin, IBuildTaskPluginCommandArgs, CommonTaskAttributeNames } from '../plugin';
+import { CommonTaskAttributeNames, IBuildTaskPlugin, IBuildTaskPluginCommandArgs } from '../plugin';
 import { OrgFormationError } from '../../org-formation-error';
 import { ConsoleUtil } from '../../util/console-util';
 import { IBuildTaskConfiguration } from '~build-tasks/build-configuration';
@@ -14,10 +14,11 @@ import { IGenericTarget } from '~state/persisted-state';
 import { ICfnExpression, ICfnSubExpression } from '~core/cfn-expression';
 import { CfnExpressionResolver } from '~core/cfn-expression-resolver';
 
+export const TYPE_FOR_TASK = 'apply-tf';
 export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, ITfCommandArgs, ITfTask> {
 
+    typeForTask = TYPE_FOR_TASK;
     type = 'tf';
-    typeForTask = 'apply-tf';
 
     convertToCommandArgs(config: ITfBuildTaskConfig, command: IPerformTasksCommandArgs): ITfCommandArgs {
 
@@ -132,7 +133,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             command = task.customDeployCommand as string;
         } else {
             const cmd = task.plan ? 'terraform plan ${CurrentTask.Parameters}' : 'terraform apply ${CurrentTask.Parameters} -auto-approve';
-            task.logVerbose = task.plan;
+            task.logVerbose = true;
             const commandExpression = { 'Fn::Sub': cmd } as ICfnSubExpression;
             command = await resolver.resolveSingleExpression(commandExpression, 'CustomDeployCommand');
         }
