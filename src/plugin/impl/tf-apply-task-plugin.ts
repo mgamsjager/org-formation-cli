@@ -1,6 +1,6 @@
 import path from 'path';
 import { existsSync } from 'fs';
-import { IBuildTaskPlugin, IBuildTaskPluginCommandArgs, CommonTaskAttributeNames } from '../plugin';
+import { CommonTaskAttributeNames, IBuildTaskPlugin, IBuildTaskPluginCommandArgs } from '../plugin';
 import { OrgFormationError } from '../../org-formation-error';
 import { ConsoleUtil } from '../../util/console-util';
 import { IBuildTaskConfiguration } from '~build-tasks/build-configuration';
@@ -14,16 +14,17 @@ import { IGenericTarget } from '~state/persisted-state';
 import { ICfnExpression, ICfnSubExpression } from '~core/cfn-expression';
 import { CfnExpressionResolver } from '~core/cfn-expression-resolver';
 
+export const TYPE_FOR_TASK = 'apply-tf';
 export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, ITfCommandArgs, ITfTask> {
 
+    typeForTask = TYPE_FOR_TASK;
     type = 'tf';
-    typeForTask = 'apply-tf';
 
     convertToCommandArgs(config: ITfBuildTaskConfig, command: IPerformTasksCommandArgs): ITfCommandArgs {
 
         Validator.ThrowForUnknownAttribute(config, config.LogicalName, ...CommonTaskAttributeNames, 'Path',
             'FailedTaskTolerance', 'MaxConcurrentTasks', 'CustomInitCommand',
-            'CustomDeployCommand', 'CustomRemoveCommand', 'Parameters', 'BackendConfig', 'IgnoreFileChanges' );
+            'CustomDeployCommand', 'CustomRemoveCommand', 'Parameters', 'BackendConfig', 'IgnoreFileChanges', 'Plan' );
 
         if (!config.Path) {
             throw new OrgFormationError(`task ${config.LogicalName} does not have required attribute Path`);
@@ -46,6 +47,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             parameters: config.Parameters,
             backendConfig: config.BackendConfig,
             ignoreFileChanges: Array.isArray(config.IgnoreFileChanges) ? config.IgnoreFileChanges : typeof config.IgnoreFileChanges === 'string' ? [config.IgnoreFileChanges] : [],
+            plan: config.Plan,
         };
     }
 
@@ -74,6 +76,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             customRemoveCommand: command.customRemoveCommand,
             parameters: command.parameters,
             backendConfig: command.backendConfig,
+            plan: command.plan,
         };
     }
 
@@ -91,6 +94,7 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             backendConfig: command.backendConfig,
             forceDeploy: typeof command.forceDeploy === 'boolean' ? command.forceDeploy : false,
             logVerbose: typeof command.verbose === 'boolean' ? command.verbose : false,
+            plan: command.plan,
         };
     }
 
@@ -128,7 +132,9 @@ export class TfBuildTaskPlugin implements IBuildTaskPlugin<ITfBuildTaskConfig, I
             Validator.throwForUnresolvedExpressions(task.customDeployCommand, 'CustomDeployCommand');
             command = task.customDeployCommand as string;
         } else {
-            const commandExpression = { 'Fn::Sub': 'terraform apply ${CurrentTask.Parameters} -auto-approve' } as ICfnSubExpression;
+            const cmd = task.plan ? 'terraform plan ${CurrentTask.Parameters}' : 'terraform apply ${CurrentTask.Parameters} -auto-approve';
+            task.logVerbose = true;
+            const commandExpression = { 'Fn::Sub': cmd } as ICfnSubExpression;
             command = await resolver.resolveSingleExpression(commandExpression, 'CustomDeployCommand');
         }
 
@@ -203,6 +209,7 @@ interface ITfBuildTaskConfig extends IBuildTaskConfiguration {
     Parameters?: Record<string, ICfnExpression>;
     BackendConfig?: Record<string, ICfnExpression>;
     IgnoreFileChanges?: string | string[];
+    Plan?: boolean;
 }
 
 export interface ITfCommandArgs extends IBuildTaskPluginCommandArgs {
@@ -213,6 +220,7 @@ export interface ITfCommandArgs extends IBuildTaskPluginCommandArgs {
     parameters?: Record<string, ICfnExpression>;
     backendConfig?: Record<string, ICfnExpression>;
     ignoreFileChanges: string[];
+    plan?: boolean;
 }
 
 export interface ITfTask extends IPluginTask {
@@ -221,4 +229,5 @@ export interface ITfTask extends IPluginTask {
     customDeployCommand?: ICfnExpression;
     customRemoveCommand?: ICfnExpression;
     backendConfig?: Record<string, ICfnExpression>;
+    plan?: boolean;
 }

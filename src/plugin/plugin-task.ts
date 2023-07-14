@@ -1,10 +1,11 @@
 import { IBuildTaskPlugin, IBuildTaskPluginCommandArgs } from './plugin';
 import { PluginCliCommand } from './plugin-command';
 import { IPluginTask } from './plugin-binder';
-import { IBuildTaskConfiguration, IBuildTask } from '~build-tasks/build-configuration';
-import { IBuildTaskProvider, BuildTaskProvider } from '~build-tasks/build-task-provider';
-import { IPerformTasksCommandArgs, RemoveCommand, BaseCliCommand } from '~commands/index';
+import { IBuildTask, IBuildTaskConfiguration } from '~build-tasks/build-configuration';
+import { BuildTaskProvider, IBuildTaskProvider } from '~build-tasks/build-task-provider';
+import { BaseCliCommand, IPerformTasksCommandArgs, RemoveCommand } from '~commands/index';
 import { ConsoleUtil } from '~util/console-util';
+import { TYPE_FOR_TASK } from "~plugin/impl/tf-apply-task-plugin";
 
 export class PluginBuildTaskProvider<TBuildTaskConfiguration extends IBuildTaskConfiguration, TCommandArgs extends IBuildTaskPluginCommandArgs, TTask extends IPluginTask> implements IBuildTaskProvider<TBuildTaskConfiguration> {
 
@@ -56,7 +57,7 @@ export class PluginBuildTaskProvider<TBuildTaskConfiguration extends IBuildTaskC
         return undefined;
     }
 
-    createTaskForValidation(config: TBuildTaskConfiguration, command: IPerformTasksCommandArgs): IBuildTask {
+    createTaskForValidation(config: TBuildTaskConfiguration | any, command: IPerformTasksCommandArgs): IBuildTask {
         return {
             type: config.Type,
             name: config.LogicalName,
@@ -64,8 +65,15 @@ export class PluginBuildTaskProvider<TBuildTaskConfiguration extends IBuildTaskC
             childTasks: [],
             isDependency: BuildTaskProvider.createIsDependency(config),
             perform: async (): Promise<void> => {
-                const commandArgs = this.plugin.convertToCommandArgs(config, command);
-                this.plugin.validateCommandArgs(commandArgs);
+                if (config.Type === TYPE_FOR_TASK) {
+                    config.Plan = 'true';
+                    const commandArgs = this.plugin.convertToCommandArgs(config, command);
+                    const pluginCommand = new PluginCliCommand<TCommandArgs, TTask>(this.plugin);
+                    await pluginCommand.performCommandNoState(commandArgs);
+                } else {
+                    const commandArgs = this.plugin.convertToCommandArgs(config, command);
+                    this.plugin.validateCommandArgs(commandArgs);
+                }
             },
         };
     }
